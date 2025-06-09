@@ -1,5 +1,5 @@
 Title:
-Access tiktoken embeddings stored in public storage account via AML
+Access tiktoken embeddings stored in public storage account via AML with managed VNET-Allow Only Approved Outbound
 
 Issue description/Symptom: 
 User have managed VNET in the Azure Machine Learning workspace configured with allow only approved outbound option. Trying to call embedding model from Azure OpenAI service, but ending up with error fetching the tiktoken embedding file from public storage account https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken with 403 error.
