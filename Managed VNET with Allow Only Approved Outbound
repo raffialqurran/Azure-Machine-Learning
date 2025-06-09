@@ -1,0 +1,66 @@
+Title:
+Access tiktoken embeddings stored in public storage account via AML
+
+Issue description/Symptom: 
+User have managed VNET in the Azure Machine Learning workspace configured with allow only approved outbound option. Trying to call embedding model from Azure OpenAI service, but ending up with error fetching the tiktoken embedding file from public storage account https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken with 403 error.
+
+Error Message: 
+File '/anaconda/envs/azureml_py38/lib/python3.10/site-packages/requests/models.py', line 1024, in raise_for_status
+   raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 403 Client Error: This request is not authorized to perform this operation. for url: https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken
+
+Cause: 
+This issue appears in managed VNET for AML workspace on allow only approved outbound setup as this is by design and a known limitation as indicated in document Managed virtual network isolation - Azure Machine Learning | Microsoft Learn and since this storage account is owned by Microsoft, then user cannot create a private endpoint on it. 
+ 
+Mitigation Steps: 
+1-	Use custom VNET instead of managed VNET, as custom VNET does not have limitation on accessing public storage account where the tiktoken file is saved. 
+2-	Use managed VNET in Azure Machine Learning with Allow internet outbound
+3-	If you need more strict access in managed VNET, as your current setup is set “Allow Only Approved Outbound”, you cannot communicate with public storage account unless you configure private endpoint on the storage account, but you cannot do this as you do not have access to that public storage account “openaipublic.blob.core.windows.net” this limitation is documented in this document Managed virtual network isolation - Azure Machine Learning | Microsoft Learn “If your managed network is configured to allow only approved outbound, you can't use an FQDN rule to access Azure Storage Accounts. You must use a private endpoint instead.” This is why when you add user defined rule for this storage account it is not working for you. 
+
+The available workaround using option 3, you have to download the tiktoken file locally (https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken), then use the local version (cached) instead of fetching it from the storage account. The downside of this solution is you need to download the tiktoken file yourself, and you need to keep it updated. 
+
+Note:
+=====
+Please add below user defined route in Azure Machine Learning – Networking – Workspace managed outbound access (Azure AI administrator role must be given for Azure Machine Learning workspace identity on Azure OpenAI resource)
+
+
+Workaround code: (Python SDKv2)
+===============================
+import os
+import tiktoken
+import tiktoken.load
+from langchain_openai import AzureOpenAIEmbeddings
+ 
+ 
+LOCAL_PATH = "./cl100k_base.tiktoken"
+ 
+def patched_read_file(blobpath):
+    if "cl100k_base.tiktoken" in blobpath:
+        print(f"[INFO] Loading tokenizer from local path: {LOCAL_PATH}")
+        with open(LOCAL_PATH, "rb") as f:
+            return f.read()
+    else:
+        # fallback to original loader
+        from tiktoken.load import read_file as original_read_file
+        return original_read_file(blobpath)
+ 
+# Apply the monkey-patch globally
+tiktoken.load.read_file = patched_read_file
+ 
+ 
+embeddings = AzureOpenAIEmbeddings(
+    model='text-embedding-3-large',
+    api_key='<Your-API-Key>',
+    azure_endpoint='https://<account>.openai.azure.com/openai/deployments/text-embedding-3-large/embeddings?api-version=2023-05-15',
+    azure_deployment='text-embedding-3-large',
+    api_version='2024-12-01-preview'
+)
+ 
+# Test embedding
+input_text = 'This is an input text to be embedded'
+vector = embeddings.embed_query(input_text)
+ 
+# Show first few elements of the vector
+print(vector[:3])
+requests.exceptions.HTTPError: 403 Client Error: This request is not authorized to perform this operation. for url: https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken
+
